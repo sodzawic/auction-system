@@ -31,22 +31,16 @@ class Auction(data: Data) extends FSM[State, Data] {
     startWith(Activated, data.copy(price = 0, winner = null))
     
     when (Activated, stateTimeout = data.bidTimeout) {
-      case Event(Bid(price: Int), data) =>
-        if (price > data.price) {
+      case Event(Bid(price: Int), data) if (price > data.price) =>
           stay using data.copy(price = price, winner = sender)
-        }
-        else { 
+      case Event(Bid(price: Int), data) =>
           stay 
-        }
-      case Event(FSM.StateTimeout, data) =>
-        if (data.price > 0) {
+      case Event(FSM.StateTimeout, data) if (data.price > 0) =>
           data.winner ! ObjectBought(data.theObject, data.seller, data.price)
           data.seller ! ObjectSold(data.theObject, data.winner, data.price)
           goto(Sold)
-        }
-        else {
+      case Event(FSM.StateTimeout, data) =>
           goto(Ignored)
-        }
     }
     
     when (Ignored, stateTimeout = data.delTimeout) {
