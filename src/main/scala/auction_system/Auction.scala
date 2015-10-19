@@ -98,13 +98,7 @@ class AuctionMain extends Actor {
       auction3 ! BidTimerExpired
       auction3 ! DelTimerExpired
     
-    case ObjectTimedout =>
-      if (objects == 1) {
-        context.system.shutdown
-      }
-      context become AwaitSold(objects - 1)
-      
-    case ObjectSold =>
+    case ObjectTimedout(_) | ObjectSold(_, _, _) =>
       if (objects == 1) {
         context.system.shutdown
       }
