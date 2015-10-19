@@ -1,14 +1,13 @@
 package auction_system
 
 import akka.actor._
+import akka.actor.FSM
 import akka.actor.Props
 import akka.event.LoggingReceive
 import scala.concurrent.duration._
 import scala.util.Random
 
 // received events
-final case object BidTimerExpired
-final case object DelTimerExpired
 final case object Relist
 final case class Bid(price: Int)
 // sent events
@@ -16,50 +15,54 @@ final case class ObjectSold(theObject: Any, buyer: ActorRef, price: Int)
 final case class ObjectBought(theObject: Any, seller: ActorRef, price: Int)
 final case class ObjectTimedout(theObject: Any)
 
+// states
+sealed trait State
+case object Ignored extends State
+case object Activated extends State
+case object Sold extends State
+    
+final case class Data(seller: ActorRef, theObject: Any, bidTimeout: FiniteDuration, delTimeout: FiniteDuration, winner: ActorRef = null, price: Int = -1)
+
 object Auction {
-  def props(seller: ActorRef, theObject: Any, bidTimeout: FiniteDuration = Duration(2, SECONDS), delTimeout: FiniteDuration = Duration(20, MILLISECONDS)): Props = Props(new Auction(seller, theObject, bidTimeout, delTimeout))
+  def props(seller: ActorRef, theObject: Any, bidTimeout: FiniteDuration = Duration(2, SECONDS), delTimeout: FiniteDuration = Duration(20, MILLISECONDS)): Props = Props(new Auction(Data(seller, theObject, bidTimeout, delTimeout)))
 }
-class Auction(seller: ActorRef, theObject: Any, bidTimeout: FiniteDuration, delTimeout: FiniteDuration) extends Actor {
-    val system = akka.actor.ActorSystem("system")
-    import system.dispatcher
+class Auction(data: Data) extends FSM[State, Data] {
+    // Created = Activated, see timeout handling
+    startWith(Activated, data.copy(price = 0, winner = null))
     
-    def Created(bidTimer: Cancellable): Receive = LoggingReceive {
-      case Bid(price: Int) =>
-        if (price > 0) {
-          context become Activated(sender, price)
+    when (Activated, stateTimeout = data.bidTimeout) {
+      case Event(Bid(price: Int), data) =>
+        if (price > data.price) {
+          stay using data.copy(price = price, winner = sender)
         }
-      case BidTimerExpired =>
-        context become Ignored(system.scheduler.scheduleOnce(delTimeout, self, DelTimerExpired))
+        else { 
+          stay 
+        }
+      case Event(FSM.StateTimeout, data) =>
+        if (data.price > 0) {
+          data.winner ! ObjectBought(data.theObject, data.seller, data.price)
+          data.seller ! ObjectSold(data.theObject, data.winner, data.price)
+          goto(Sold)
+        }
+        else {
+          goto(Ignored)
+        }
     }
     
-    def Ignored(delTimer: Cancellable): Receive = LoggingReceive {
-      case Relist =>
-        delTimer.cancel()
-        context become Created(system.scheduler.scheduleOnce(bidTimeout, self, BidTimerExpired))
-      case DelTimerExpired =>
-        seller ! ObjectTimedout(theObject)
-        context.stop(self)
+    when (Ignored, stateTimeout = data.delTimeout) {
+      case Event(Relist, data) =>
+        goto(Activated)
+      case Event(FSM.StateTimeout, data) =>
+        data.seller ! ObjectTimedout(data.theObject)
+        stop()
     }
     
-    def Activated(winner: ActorRef, price: Int): Receive = LoggingReceive {
-      case Bid(newPrice: Int) =>
-      if (newPrice > price) {
-        context become Activated(sender, newPrice)
-      }
-      case BidTimerExpired =>
-        context become Sold(winner, price)
-        winner ! ObjectBought(theObject, seller, price)
-        seller ! ObjectSold(theObject, winner, price)
-        system.scheduler.scheduleOnce(delTimeout, self, DelTimerExpired)
+    when (Sold, stateTimeout = data.delTimeout) {
+      case Event(FSM.StateTimeout, data) =>
+        stop()
     }
     
-    def Sold(winner: ActorRef, price: Int): Receive = LoggingReceive {
-      case DelTimerExpired =>
-        context.stop(self)
-    }
-    
-    // initial state
-    def receive = Created(system.scheduler.scheduleOnce(bidTimeout, self, BidTimerExpired))
+    initialize()
 }
 
 object Buyer {
@@ -68,7 +71,7 @@ object Buyer {
 class Buyer(auctions: Seq[ActorRef]) extends Actor {
   def receive = LoggingReceive {
     case "Bid" =>
-      val price = Random.nextInt()
+      val price = Random.nextInt(100)
       val auction = auctions(Random.nextInt(auctions.size))
       auction ! Bid(price)
   }
