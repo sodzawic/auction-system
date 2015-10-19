@@ -17,27 +17,28 @@ final case class ObjectBought(theObject: Any, seller: ActorRef, price: Int)
 final case class ObjectTimedout(theObject: Any)
 
 object Auction {
-  def props(seller: ActorRef, theObject: Any): Props = Props(new Auction(seller, theObject))
+  def props(seller: ActorRef, theObject: Any, bidTimeout: FiniteDuration = Duration(2, SECONDS), delTimeout: FiniteDuration = Duration(20, MILLISECONDS)): Props = Props(new Auction(seller, theObject, bidTimeout, delTimeout))
 }
-class Auction(seller: ActorRef, theObject: Any) extends Actor {
-    def Created: Receive = LoggingReceive {
-    case Bid(price: Int) =>
-      if (price > 0) {
-        context become Activated(sender, price)
-      }
-    case BidTimerExpired =>
-      context become Ignored
-      // start del timer
+class Auction(seller: ActorRef, theObject: Any, bidTimeout: FiniteDuration, delTimeout: FiniteDuration) extends Actor {
+    val system = akka.actor.ActorSystem("system")
+    import system.dispatcher
+    
+    def Created(bidTimer: Cancellable): Receive = LoggingReceive {
+      case Bid(price: Int) =>
+        if (price > 0) {
+          context become Activated(sender, price)
+        }
+      case BidTimerExpired =>
+        context become Ignored(system.scheduler.scheduleOnce(delTimeout, self, DelTimerExpired))
     }
     
-    def Ignored: Receive = LoggingReceive {
+    def Ignored(delTimer: Cancellable): Receive = LoggingReceive {
       case Relist =>
-        context become Created
-        // kill del timer
-        // start bid timer
-    case DelTimerExpired =>
-      seller ! ObjectTimedout(theObject)
-      // delete
+        delTimer.cancel()
+        context become Created(system.scheduler.scheduleOnce(bidTimeout, self, BidTimerExpired))
+      case DelTimerExpired =>
+        seller ! ObjectTimedout(theObject)
+        context.stop(self)
     }
     
     def Activated(winner: ActorRef, price: Int): Receive = LoggingReceive {
@@ -45,11 +46,11 @@ class Auction(seller: ActorRef, theObject: Any) extends Actor {
       if (newPrice > price) {
         context become Activated(sender, newPrice)
       }
-    case BidTimerExpired =>
-      context become Sold(winner, price)
-      // start del timer
-      winner ! ObjectBought(theObject, seller, price)
-      seller ! ObjectSold(theObject, winner, price)
+      case BidTimerExpired =>
+        context become Sold(winner, price)
+        winner ! ObjectBought(theObject, seller, price)
+        seller ! ObjectSold(theObject, winner, price)
+        system.scheduler.scheduleOnce(delTimeout, self, DelTimerExpired)
     }
     
     def Sold(winner: ActorRef, price: Int): Receive = LoggingReceive {
@@ -57,7 +58,8 @@ class Auction(seller: ActorRef, theObject: Any) extends Actor {
         context.stop(self)
     }
     
-    def receive = Created
+    // initial state
+    def receive = Created(system.scheduler.scheduleOnce(bidTimeout, self, BidTimerExpired))
 }
 
 object Buyer {
@@ -91,20 +93,8 @@ class AuctionMain extends Actor {
       buyer2 ! "Bid"
       buyer3 ! "Bid"
       buyer4 ! "Bid"
-      auction1 ! BidTimerExpired
-      auction1 ! DelTimerExpired
-      auction2 ! BidTimerExpired
-      auction2 ! DelTimerExpired
-      auction3 ! BidTimerExpired
-      auction3 ! DelTimerExpired
     
-    case ObjectTimedout =>
-      if (objects == 1) {
-        context.system.shutdown
-      }
-      context become AwaitSold(objects - 1)
-      
-    case ObjectSold =>
+    case ObjectTimedout(_) | ObjectSold(_, _, _) =>
       if (objects == 1) {
         context.system.shutdown
       }
