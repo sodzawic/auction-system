@@ -21,10 +21,8 @@ object Auction {
 }
 class Auction(seller: ActorRef, theObject: Any) extends Actor {
     def Created: Receive = LoggingReceive {
-    case Bid(price: Int) =>
-      if (price > 0) {
-        context become Activated(sender, price)
-      }
+    case Bid(price: Int) if (price > 0) =>
+      context become Activated(sender, price)
     case BidTimerExpired =>
       context become Ignored
       // start del timer
@@ -35,21 +33,20 @@ class Auction(seller: ActorRef, theObject: Any) extends Actor {
         context become Created
         // kill del timer
         // start bid timer
-    case DelTimerExpired =>
-      seller ! ObjectTimedout(theObject)
-      // delete
+      case DelTimerExpired =>
+        seller ! ObjectTimedout(theObject)
+        context.stop(self)    
     }
     
     def Activated(winner: ActorRef, price: Int): Receive = LoggingReceive {
-      case Bid(newPrice: Int) =>
-      if (newPrice > price) {
+      case Bid(newPrice: Int) if (newPrice > price) =>
         context become Activated(sender, newPrice)
-      }
-    case BidTimerExpired =>
-      context become Sold(winner, price)
-      // start del timer
-      winner ! ObjectBought(theObject, seller, price)
-      seller ! ObjectSold(theObject, winner, price)
+      case Bid(_) =>
+      case BidTimerExpired =>
+        context become Sold(winner, price)
+        // start del timer
+        winner ! ObjectBought(theObject, seller, price)
+        seller ! ObjectSold(theObject, winner, price)
     }
     
     def Sold(winner: ActorRef, price: Int): Receive = LoggingReceive {
