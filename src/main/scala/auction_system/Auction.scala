@@ -24,10 +24,9 @@ class Auction(seller: ActorRef, theObject: Any, bidTimeout: FiniteDuration, delT
     import system.dispatcher
     
     def Created(bidTimer: Cancellable): Receive = LoggingReceive {
-      case Bid(price: Int) =>
-        if (price > 0) {
-          context become Activated(sender, price)
-        }
+      case Bid(price: Int) if (price > 0) =>
+        context become Activated(sender, price)
+      case Bid(_) =>
       case BidTimerExpired =>
         context become Ignored(system.scheduler.scheduleOnce(delTimeout, self, DelTimerExpired))
     }
@@ -42,10 +41,9 @@ class Auction(seller: ActorRef, theObject: Any, bidTimeout: FiniteDuration, delT
     }
     
     def Activated(winner: ActorRef, price: Int): Receive = LoggingReceive {
-      case Bid(newPrice: Int) =>
-      if (newPrice > price) {
+      case Bid(newPrice: Int) if (newPrice > price) =>
         context become Activated(sender, newPrice)
-      }
+      case Bid(_) =>
       case BidTimerExpired =>
         context become Sold(winner, price)
         winner ! ObjectBought(theObject, seller, price)
