@@ -24,7 +24,7 @@ case object Sold extends State
 final case class Data(seller: ActorRef, theObject: Any, bidTimeout: FiniteDuration, delTimeout: FiniteDuration, winner: ActorRef = null, price: Int = -1)
 
 object Auction {
-  def props(seller: ActorRef, theObject: Any, bidTimeout: FiniteDuration = Duration(2, SECONDS), delTimeout: FiniteDuration = Duration(20, MILLISECONDS)): Props = Props(new Auction(Data(seller, theObject, bidTimeout, delTimeout)))
+  def props(seller: ActorRef, theObject: Any, bidTimeout: FiniteDuration = Duration(20, MILLISECONDS), delTimeout: FiniteDuration = Duration(2, SECONDS)): Props = Props(new Auction(Data(seller, theObject, bidTimeout, delTimeout)))
 }
 class Auction(data: Data) extends FSM[State, Data] {
     // Created = Activated, see timeout handling
