@@ -17,7 +17,7 @@ final case class ObjectBought(theObject: Any, seller: ActorRef, price: Int)
 final case class ObjectTimedout(theObject: Any)
 
 object Auction {
-  def props(seller: ActorRef, theObject: Any, bidTimeout: FiniteDuration = Duration(2, SECONDS), delTimeout: FiniteDuration = Duration(20, MILLISECONDS)): Props = Props(new Auction(seller, theObject, bidTimeout, delTimeout))
+  def props(seller: ActorRef, theObject: Any, bidTimeout: FiniteDuration = Duration(20, MILLISECONDS), delTimeout: FiniteDuration = Duration(2, SECONDS)): Props = Props(new Auction(seller, theObject, bidTimeout, delTimeout))
 }
 class Auction(seller: ActorRef, theObject: Any, bidTimeout: FiniteDuration, delTimeout: FiniteDuration) extends Actor {
     val system = akka.actor.ActorSystem("system")
